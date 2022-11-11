@@ -1,0 +1,262 @@
+---
+title: "Plots - 'artificial VS natural' -experiment"
+author: "Ivan Calandra & Lisa Schunk"
+date: "`r Sys.time()`"
+output:
+  html_document:
+    df_print: paged
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    number_sections: true
+---
+
+
+```{r Knitr Options, include=FALSE}
+knitr::opts_chunk$set(comment=NA, message=FALSE, indent="", error=TRUE)
+
+```
+
+---
+
+
+# Goal of the script
+This script plots all variables to see which ones should be used for further analysis.  
+Scatterplot of each variable will be plotted.   
+
+
+
+```{r}
+dir_in <- "analysis/derived_data/"
+dir_out <- "analysis/plots"
+
+```
+
+Raw data must be located in `r paste0("~/", dir_in)`.  
+Formatted data will be saved in `r paste0("~/", dir_out)`.
+
+The knit directory for this script is the project directory.
+---
+
+
+# Load packages
+```{r Libraries}
+pack_to_load <- c("tools", "ggplot2", "doBy", "R.utils", "tidyverse", "patchwork", "wesanderson", "ggsci", "ggfortify")
+sapply(pack_to_load, library, character.only = TRUE, logical.return = TRUE)
+
+```
+
+---
+
+# Get name, path and information of the file 
+```{r}
+data_file <- list.files(dir_in, pattern = "\\.Rbin$", full.names = TRUE)
+md5_in <- md5sum(data_file)
+info_in <- data.frame(file = basename(names(md5_in)), checksum = md5_in, row.names = NULL)
+
+```
+
+
+# Load data into R object
+```{r}
+imp_data <- loadObject(data_file)
+str(imp_data)
+
+```
+
+The imported file is: "`r paste0("~/", data_file)`"  
+
+
+---
+
+# Prepare variables
+## Define numeric variables
+```{r}
+num.var <- 22:length(imp_data)
+
+```
+
+The following variables will be used: 
+
+```{r, echo=FALSE}
+for (i in num.var) cat("[",i,"] ", names(imp_data)[i], "\n", sep="")
+
+```
+
+
+---
+
+# Plot each of the selected numeric variable (facet plot = 1 plot for flint, 1 plot for lydite)
+```{r}
+for (i in num.var){
+	#plot
+  range_var <- range(imp_data[[i]]) # get the min/max range of the data set 
+  
+	p_lydite <- ggplot(data = imp_data[grep("LYDIT", imp_data[["Sample"]]), ], 
+	                   aes_string(x = "Cycle", y = names(imp_data)[i], 
+	                               colour = "Spot")) + 
+	            # avoid overplotting
+	            geom_point(size = 3) + 
+	            geom_line(aes(group = Spot)) + 
+	            facet_wrap(Sample+Location ~ Contact.material, nrow = 2) + 
+		          coord_cartesian(ylim = range_var) + 
+	            ylab(names(imp_data)[i]) + xlab(NULL) +
+	            labs(y = gsub("\\.", " ", names(imp_data)[i])) + 
+	            scale_colour_futurama() +
+	            theme_classic()
+
+	p_flint <- ggplot(data = imp_data[grep("FLT", imp_data[["Sample"]]), ], 
+	                  aes_string(x = "Cycle", y = names(imp_data)[i], 
+	                             colour = "Spot")) + 
+	           geom_point(size = 3) +
+	           geom_line(aes(group = Spot)) +
+	           facet_wrap(Sample+Location ~ Contact.material, nrow = 2) +
+	           coord_cartesian(ylim = range_var) + 
+	           ylab(names(imp_data)[i]) + xlab(NULL) +
+	           labs(y = gsub("\\.", " ", names(imp_data)[i])) + 
+	           scale_colour_futurama() +
+	           theme_classic()
+	  
+	# combine the flint and the lydite plots 
+  p <- p_flint + p_lydite + plot_layout(width = c(3/5, 2/5), guides = 'collect')  
+       
+
+#save to PDF
+	file_out <- paste0(file_path_sans_ext(info_in[["file"]]), "_plot_", names(imp_data)[i], ".pdf")
+	ggsave(filename = file_out, plot = p, path = dir_out, device = "pdf")
+
+}
+
+```
+
+
+# Plot each of the selected numeric variable in one scatter plot 
+```{r}
+# exclude the outliers 
+# add the indices as row numbers 
+imp_data <- imp_data %>% mutate(id = row_number())
+imp_data2 <- imp_data[-c(10:12,16:18,19, 20, 58), ]
+
+# add a column that combines sample and location
+sample_data <- unite(imp_data2, sample_location, c(Sample, Location), remove = FALSE)
+# compute the mean of the three spots per sample 
+sample_spot <- summaryBy(.~sample_location+Cycle+Contact.material+Raw.material, 
+                         data = sample_data, FUN = mean)
+# num.var needs to be defined new since the number of columns changed 
+new.num.var <- num.var - 7
+
+sample_spot[["Contact.material"]] <- factor(sample_spot[["Contact.material"]])
+# GrandBudapest1 = c("#F1BB7B", "#FD6467", "#5B1A18", "#D67236")
+custom.col3 <- data.frame(type = levels(sample_spot$Contact.material), 
+                         col = c("#F1BB7B", "#FD6467", "#5B1A18", "#D67236")) 
+sample_spot$col <- custom.col3[sample_spot$Contact.material, "col"]
+
+
+for (i in new.num.var){
+	
+	p_all <- ggplot(data = sample_spot, aes_string(x = "Cycle", y = names(sample_spot)[i], 
+	         colour = "Contact.material", shape = "Raw.material")) +
+	         geom_point(size = 3) + 
+	         geom_line(aes(group = sample_location)) + 
+	         ylab(names(sample_spot)[i]) + xlab(NULL) +
+	         labs(y = gsub("\\.", " ", names(sample_spot)[i])) +
+	         labs(colour = "Contact material", shape = "Raw material") + 
+	         scale_colour_manual(values = custom.col3$col) +  
+	         theme_classic()
+
+#save to PDF
+	file_out <- paste0(file_path_sans_ext(info_in[["file"]]), "_VS_plot_", names(sample_spot)[i], ".pdf")
+	ggsave(filename = file_out, plot = p_all, path = dir_out, device = "pdf")
+
+}
+
+```
+
+
+## Principal component analysis 
+### PCA contact material
+```{r}
+
+# remove rows with na values 
+data_pca <- na.omit(imp_data2)
+# use for the PCA only selected variables: Sq, SSK, Vmc, Isotropy, Mean density of furrows,
+# Asfc, HAsfc9 
+imp_data.pca <- prcomp(data_pca[, c(22:23, 40, 45, 49, 52, 54)], scale. = TRUE) 
+# convert the data into factor 
+data_pca[["Contact.material"]] <- factor(data_pca[["Contact.material"]])
+
+
+# GrandBudapest1 = c("#F1BB7B", "#FD6467", "#5B1A18", "#D67236")
+custom.col3 <- data.frame(type = levels(data_pca$Contact.material), 
+                         col = c("#F1BB7B", "#FD6467", "#5B1A18", "#D67236")) 
+data_pca$col <- custom.col3[data_pca$Contact.material, "col"]
+
+# Using ggfortify
+PCA<- autoplot(imp_data.pca, data = data_pca, colour = "Contact.material", size = 2,
+             loadings = TRUE, loadings.colour = "black", loadings.label = TRUE,
+             loadings.label.colour = "black", 
+             loadings.label.size  = 4, loadings.label.repel = TRUE,  
+             #frame = TRUE, frame.type = "convex", frame.colour = "Contact.material",
+             frame.alpha = 0) + 
+             theme_classic() +
+             scale_colour_manual(values = custom.col3$col)
+         
+
+# save the plot
+file_out <- paste0(file_path_sans_ext(info_in[["file"]]), "_PCA_contact", ".pdf")
+ggsave(filename = file_out, plot = PCA, path = dir_out, device = "pdf")
+  
+```
+
+
+### PCA before and after 
+```{r}
+# convert the data into factor 
+data_pca[["Cycle"]] <- factor(data_pca[["Cycle"]])
+
+
+
+#  Cavalcanti1 = c("#D8B70A", "#02401B", "#A2A475", "#81A88D", "#972D15")
+custom.col6 <- data.frame(type = levels(data_pca$Cycle), 
+                         col = c("#D8B70A", "#02401B")) 
+data_pca$col <- custom.col6[data_pca$Cycle, "col"]
+
+# using ggfortify
+PCA2<- autoplot(imp_data.pca, data = data_pca, colour = "Cycle", size = 2,
+             loadings = TRUE, loadings.colour = "black", loadings.label = TRUE, 
+             loadings.label.colour = "black", 
+             loadings.label.size  = 4, loadings.label.repel = TRUE, frame.alpha = 0) + 
+             theme_classic() +
+             scale_colour_manual(values = custom.col6$col)
+         
+
+# save the plot
+file_out <- paste0(file_path_sans_ext(info_in[["file"]]), "_PCA_cycle", ".pdf")
+ggsave(filename = file_out, plot = PCA2, path = dir_out, device = "pdf")
+  
+```
+
+
+
+---
+
+# sessionInfo() and RStudio version
+
+```{r}
+sessionInfo()
+
+```
+
+RStudio version `r readLines("analysis/scripts/RStudioVersion.txt", n = 1)`.
+
+
+# Cite R packages used
+```{r Citation}
+for (i in pack_to_load) print(citation(i), bibtex = FALSE)
+
+```
+
+
+---
+
+END OF SCRIPT
